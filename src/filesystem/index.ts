@@ -128,6 +128,12 @@ const GetFileInfoArgsSchema = z.object({
   path: z.string(),
 });
 
+const PatchFileArgsSchema = z.object({
+  path: z.string(),
+  offset: z.number(),
+  content: z.string(),
+});
+
 const ToolInputSchema = ToolSchema.shape.inputSchema;
 type ToolInput = z.infer<typeof ToolInputSchema>;
 
@@ -280,6 +286,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: zodToJsonSchema(GetFileInfoArgsSchema) as ToolInput,
       },
       {
+        name: "patch_file",
+        description: "Modify a portion of an existing file starting at the specified offset. " +
+                    "This allows partial updates without rewriting the entire file. " +
+                    "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(PatchFileArgsSchema) as ToolInput,
+      },
+      {
         name: "list_allowed_directories",
         description: 
           "Returns the list of directories that this server is allowed to access. " +
@@ -411,6 +424,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             .join("\n") }],
         };
       }
+
+      case "patch_file": {
+        const parsed = PatchFileArgsSchema.safeParse(args);
+        if (!parsed.success) {
+            throw new Error(`Invalid arguments for patch_file: ${parsed.error}`);
+        }
+        
+        const validPath = await validatePath(parsed.data.path);
+        
+        const existingContent = await fs.readFile(validPath, "utf-8");
+        const newContent = 
+            existingContent.slice(0, parsed.data.offset) +
+            parsed.data.content +
+            existingContent.slice(parsed.data.offset + parsed.data.content.length);
+        
+        await fs.writeFile(validPath, newContent, "utf-8");
+        
+        return {
+            content: [{ type: "text", text: `Successfully patched ${parsed.data.path} at offset ${parsed.data.offset}` }],
+        };
+    }
 
       case "list_allowed_directories": {
         return {
